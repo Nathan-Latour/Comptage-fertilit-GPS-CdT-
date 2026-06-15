@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fertilité GPS">
+<title>Comptage fertilité GPS</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+<style>
+* { box-sizing: border-box; }
+body {
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  background:#f6f7f8;
+  color:#111827;
+  padding:12px;
+  padding-bottom:28px;
+}
+h1 { text-align:center; font-size:23px; margin:6px 0 10px; }
+.card,.counter {
+  background:#fff;
+  border:1px solid #d1d5db;
+  border-radius:18px;
+  padding:12px;
+  margin-bottom:12px;
+  box-shadow:0 1px 4px rgba(0,0,0,.06);
+}
+label { display:block; font-weight:800; margin-bottom:6px; font-size:15px; }
+select,input,textarea {
+  width:100%;
+  font-size:17px;
+  padding:12px;
+  border:1px solid #d1d5db;
+  border-radius:14px;
+  background:#fff;
+}
+textarea { min-height:62px; resize:vertical; }
+.small { color:#6b7280; font-size:13px; margin-top:6px; line-height:1.35; }
+.status {
+  padding:10px;
+  border-radius:14px;
+  background:#f3f4f6;
+  font-size:14px;
+  font-weight:700;
+  line-height:1.35;
+}
+.status.ok { background:#dcfce7; color:#14532d; }
+.status.warn { background:#fef3c7; color:#78350f; }
+.status.err { background:#fee2e2; color:#7f1d1d; }
+#map {
+  height: 42vh;
+  min-height:310px;
+  width:100%;
+  border-radius:18px;
+  border:1px solid #d1d5db;
+  overflow:hidden;
+}
+.map-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+button {
+  border:0;
+  border-radius:16px;
+  font-size:18px;
+  font-weight:900;
+  min-height:58px;
+  background:#111827;
+  color:white;
+  touch-action:manipulation;
+}
+button.secondary { background:#4b5563; }
+button.save { background:#1d4ed8; }
+button.export { background:#166534; }
+button.reset { background:#b91c1c; }
+button.info { background:#0369a1; }
+button.minus { background:#374151; font-size:30px; }
+button.plus { font-size:30px; }
+.counter-title { font-weight:900; font-size:18px; margin-bottom:9px; display:flex; align-items:center; gap:8px; }
+.dot { width:14px; height:14px; border-radius:50%; display:inline-block; border:1px solid rgba(0,0,0,.2); }
+.counter-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; align-items:center; }
+.value {
+  text-align:center;
+  font-size:38px;
+  font-weight:900;
+  line-height:68px;
+  background:#f3f4f6;
+  border-radius:16px;
+  min-height:68px;
+}
+.grid2 { display:grid; grid-template-columns:1fr; gap:10px; }
+.check-grid { display:grid; grid-template-columns:1fr; gap:7px; }
+.check-item {
+  display:flex; align-items:center; gap:10px;
+  background:#f9fafb; border:1px solid #d1d5db; border-radius:14px; padding:10px; font-weight:800;
+}
+.check-item input { width:22px; height:22px; padding:0; }
+.saved-list {
+  max-height:260px;
+  overflow:auto;
+  border:1px solid #d1d5db;
+  border-radius:14px;
+  background:#f9fafb;
+  padding:8px;
+}
+.saved-item {
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:12px;
+  padding:9px;
+  margin-bottom:8px;
+  font-size:13px;
+}
+.actions {
+  display:grid;
+  grid-template-columns:1fr;
+  gap:10px;
+  position:sticky;
+  bottom:10px;
+  z-index:800;
+}
+.leaflet-popup-content { font-size:14px; }
+@media (min-width:900px) {
+  body { max-width:1180px; margin:auto; }
+  .layout { display:grid; grid-template-columns: 0.95fr 1.05fr; gap:12px; align-items:start; }
+  #map { height: 72vh; min-height:620px; position:sticky; top:10px; }
+  .grid2 { grid-template-columns:1fr 1fr; }
+  .actions { position:static; }
+}
+</style>
+</head>
+<body>
+<h1>Comptage fertilité GPS</h1>
+
+<div class="layout">
+  <div>
+    <div class="grid2">
+      <div class="card">
+        <label for="nomParcelle">nom_parcelle</label>
+        <select id="nomParcelle"></select>
+        <div class="small">Choisis d’abord la parcelle. Les doublons sont gérés avec l’id_zone.</div>
+      </div>
+      <div class="card">
+        <label for="parcelle">id_zone / ID_1</label>
+        <select id="parcelle"></select>
+        <div class="small" id="zoneHelp">Sélectionne d'abord une parcelle.</div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <label for="rang">Rang / secteur</label>
+        <input id="rang" type="text" placeholder="Ex : rang 8, zone nord...">
+      </div>
+      <div class="card">
+        <label for="operateur">Opérateur</label>
+        <input id="operateur" type="text" placeholder="Optionnel">
+      </div>
+    </div>
+
+    <div class="card">
+      <label>État GPS</label>
+      <div id="gpsStatus" class="status warn">GPS non activé. Clique sur “Activer GPS”.</div>
+      <div class="map-actions">
+        <button type="button" class="info" onclick="startGpsWatch()">Activer GPS</button>
+        <button type="button" class="secondary" onclick="centerOnSelectedParcel()">Centrer zone</button>
+      </div>
+      <div class="small">À chaque clic “+”, l’application enregistre un pied observé avec un point GPS. Si le GPS tombe hors de l’id_zone sélectionné, le point est forcé dans son contour. Si le GPS est absent, un point de secours est placé au centre de la zone.</div>
+    </div>
+
+    <div class="card">
+      <label>Barème fertilité à afficher</label>
+      <div id="checks" class="check-grid"></div>
+      <button type="button" class="secondary" onclick="showAllCounters()">Tout afficher</button>
+    </div>
+
+    <div id="counters"></div>
+
+    <div class="card">
+      <label for="commentaire">Commentaire général</label>
+      <textarea id="commentaire" placeholder="Optionnel"></textarea>
+    </div>
+
+    <div class="card">
+      <label>Points enregistrés</label>
+      <div class="small" id="savedSummary">Aucune observation.</div>
+      <div class="saved-list" id="savedList"></div>
+      <div class="map-actions">
+        <button type="button" class="secondary" onclick="deleteLastObservation()">Supprimer dernier point</button>
+        <button type="button" class="reset" onclick="clearAllObservations()">Tout effacer</button>
+      </div>
+      <button type="button" class="secondary" onclick="resetCurrentZone()" style="width:100%;margin-top:10px;">Remettre à zéro les compteurs de l’id_zone</button>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="export" onclick="exportCSV()">Exporter CSV points GPS</button>
+      <button type="button" class="export" onclick="exportGeoJSON()">Exporter GeoJSON QGIS</button>
+      <button type="button" class="info" onclick="exportSummaryCSV()">Exporter synthèse fertilité</button>
+    </div>
+  </div>
+
+  <div>
+    <div id="map"></div>
+  </div>
+</div>
+
+<script>
+const PARCELLAIRE = {"type":"FeatureCollection","name":"Parcellaire 18 rangs CdT","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:OGC:1.3:CRS84"}},"features":[{"type":"Feature","properties":{"fid":40,"ID_1":"HBM 107-129","Parcelle":"Bonnes Mares","Surface":0.14004320679977536,"Rendements_moyens_rendement_moyen":0.0,"Rendements_moyens_pente (hl/ha/an)":0.0},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.957572850747987,47.19491080804176],[4.957836077701674,47.194829502708366],[4.958232603515142,47.195498562163934],[4.958119154648586,47.195532018354776],[4.95810620504714,47.1955214452642],[4.95807576783877,47.195458625096535],[4.957746333142635,47.19519036222244],[4.957700636379743,47.19513084282473],[4.957572850747987,47.19491080804176]]]]}},{"type":"Feature","properties":{"fid":41,"ID_1":"HBM 1-18","Parcelle":"Jeanniard","Surface":0.13886113783419132,"Rendements_moyens_rendement_moyen":29.76858586,"Rendements_moyens_pente (hl/ha/an)":-0.189090909},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958906693876894,47.194533068033664],[4.959117083486308,47.19447524584991],[4.959517199274377,47.19514256475209],[4.959307158439524,47.195204972458896],[4.958906693876894,47.194533068033664]]]]}},{"type":"Feature","properties":{"fid":42,"ID_1":"HBM 19-34","Parcelle":"Jeanniard","Surface":0.12666961371302604,"Rendements_moyens_rendement_moyen":31.93412525,"Rendements_moyens_pente (hl/ha/an)":-0.301818182},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958713897461353,47.19459164340793],[4.958906693876894,47.19453306803368],[4.959307158439525,47.195204972458896],[4.959115816467477,47.19525614102465],[4.958713897461353,47.19459164340793]]]]}},{"type":"Feature","properties":{"fid":43,"ID_1":"HBM 35-52","Parcelle":"Bonnes Mares","Surface":0.14421604499816895,"Rendements_moyens_rendement_moyen":29.35212121,"Rendements_moyens_pente (hl/ha/an)":-1.592727273},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958494797852918,47.19465023425791],[4.958599322019306,47.1946191637406],[4.958713897461353,47.19459164340793],[4.959115816467477,47.19525614102465],[4.958896074098208,47.19531958255148],[4.958494797852918,47.19465023425791]]]]}},{"type":"Feature","properties":{"fid":44,"ID_1":"HBM 53-70","Parcelle":"Bonnes Mares","Surface":0.1431896081004292,"Rendements_moyens_rendement_moyen":29.91866667,"Rendements_moyens_pente (hl/ha/an)":-1.46},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958273928473143,47.19470773827736],[4.958494797852918,47.19465023425791],[4.958896074098208,47.19531958255148],[4.958872707195429,47.19532271212687],[4.958793218705146,47.1953416292289],[4.958676582769825,47.19537749796678],[4.958273928473143,47.19470773827736]]]]}},{"type":"Feature","properties":{"fid":45,"ID_1":"HBM 71-88","Parcelle":"Bonnes Mares","Surface":0.1395912198394537,"Rendements_moyens_rendement_moyen":25.23468687,"Rendements_moyens_pente (hl/ha/an)":-1.054545455},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958063110007918,47.19476879221002],[4.958273928473143,47.19470773827736],[4.958676582769825,47.19537749796678],[4.958465373185192,47.19543787685291],[4.958063110007918,47.19476879221002]]]]}},{"type":"Feature","properties":{"fid":46,"ID_1":"HBM 89-106","Parcelle":"Bonnes Mares","Surface":0.15001187349408865,"Rendements_moyens_rendement_moyen":18.77737374,"Rendements_moyens_pente (hl/ha/an)":-1.219090909},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.957836077701674,47.194829502708366],[4.958063110007918,47.19476879221003],[4.958465373185192,47.19543787685291],[4.958232603515143,47.195498562163955],[4.957836077701674,47.194829502708366]]]]}},{"type":"Feature","properties":{"fid":47,"ID_1":"BBM 1-20","Parcelle":"Plantation 2005","Surface":0.1531211594939232,"Rendements_moyens_rendement_moyen":24.48305455,"Rendements_moyens_pente (hl/ha/an)":-1.120909091},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.95937031604076,47.19440440633306],[4.959137300353206,47.19447061918247],[4.959534655617778,47.19513711674548],[4.959769016097233,47.195075222796746],[4.95937031604076,47.19440440633306]]]]}},{"type":"Feature","properties":{"fid":48,"ID_1":"BBM 21-38","Parcelle":"Les Loups","Surface":0.145161410240829,"Rendements_moyens_rendement_moyen":23.09977778,"Rendements_moyens_pente (hl/ha/an)":-1.176969697},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959589627168497,47.19434419717599],[4.95937031604076,47.19440440633306],[4.959769016097233,47.195075222796746],[4.959992257159345,47.19501786143592],[4.959589627168497,47.19434419717599]]]]}},{"type":"Feature","properties":{"fid":49,"ID_1":"BBM 39-56","Parcelle":"Les Loups","Surface":0.15069738651663064,"Rendements_moyens_rendement_moyen":22.8230303,"Rendements_moyens_pente (hl/ha/an)":-1.819090909},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959589627168497,47.19434419717599],[4.959818657212432,47.194280998449095],[4.9602189178276,47.19495451643286],[4.959992257159345,47.195017861435936],[4.959589627168497,47.19434419717599]]]]}},{"type":"Feature","properties":{"fid":50,"ID_1":"BBM 57-74","Parcelle":"Les Loups","Surface":0.1443453484594822,"Rendements_moyens_rendement_moyen":28.87692929,"Rendements_moyens_pente (hl/ha/an)":0.029090909},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959818657212432,47.194280998449095],[4.960036373526417,47.19422199445763],[4.960439221644507,47.19489404054929],[4.9602189178276,47.194954516432844],[4.959818657212432,47.194280998449095]]]]}},{"type":"Feature","properties":{"fid":51,"ID_1":"BBM 75-83","Parcelle":"Les Loups","Surface":0.0733210646443069,"Rendements_moyens_rendement_moyen":27.55345455,"Rendements_moyens_pente (hl/ha/an)":0.914545455},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960036373526417,47.19422199445763],[4.960146630828035,47.194190948410046],[4.960550860461042,47.19486340474945],[4.960439221644507,47.19489404054929],[4.960036373526417,47.19422199445763]]]]}},{"type":"Feature","properties":{"fid":52,"ID_1":"BBM 84-103","Parcelle":"Les Ruchots","Surface":0.15965883953124285,"Rendements_moyens_rendement_moyen":16.52184458,"Rendements_moyens_pente (hl/ha/an)":-1.271818182},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960146630828035,47.194190948410046],[4.960391113762849,47.19412478523091],[4.960790991402509,47.19479762552094],[4.960550860461042,47.19486340474945],[4.960146630828035,47.194190948410046]]]]}},{"type":"Feature","properties":{"fid":53,"ID_1":"BBM 104-124","Parcelle":"Les Ruchots","Surface":0.15909938731109724,"Rendements_moyens_rendement_moyen":29.94036364,"Rendements_moyens_pente (hl/ha/an)":-0.256363636},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960391113762849,47.19412478523091],[4.960628091933202,47.19405750931345],[4.960946110948447,47.19458614776868],[4.960960303592407,47.194590929708625],[4.961037534847659,47.194723112618554],[4.960790991402509,47.19479762552094],[4.960391113762849,47.19412478523091]]]]}},{"type":"Feature","properties":{"fid":54,"ID_1":"BMI 1-18","Parcelle":"Pressoir","Surface":0.2094877911377931,"Rendements_moyens_rendement_moyen":22.0060303,"Rendements_moyens_pente (hl/ha/an)":-0.174545455},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959576533562706,47.1951626365828],[4.959773686612308,47.19511171840057],[4.960358597212855,47.19608185872439],[4.960137644359545,47.196143203842944],[4.959572840291255,47.19520108591793],[4.959576533562706,47.1951626365828]]]]}},{"type":"Feature","properties":{"fid":55,"ID_1":"BMI 19-36","Parcelle":"Pressoir","Surface":0.20881154589354992,"Rendements_moyens_rendement_moyen":20.11351515,"Rendements_moyens_pente (hl/ha/an)":0.295454545},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959773686612308,47.19511171840058],[4.959990989461416,47.19504864096632],[4.960577192410487,47.19602159490153],[4.960358597212855,47.19608185872439],[4.959773686612308,47.19511171840058]]]]}},{"type":"Feature","properties":{"fid":56,"ID_1":"BMI 37-54","Parcelle":"Pressoir","Surface":0.21003007939308882,"Rendements_moyens_rendement_moyen":21.51778788,"Rendements_moyens_pente (hl/ha/an)":0.240909091},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959990989461416,47.19504864096632],[4.960213677344924,47.19499089306639],[4.960796422733688,47.19596070933322],[4.960577192410487,47.19602159490153],[4.959990989461416,47.19504864096632]]]]}},{"type":"Feature","properties":{"fid":57,"ID_1":"BMI 55-72","Parcelle":"Pressoir","Surface":0.20923829703629016,"Rendements_moyens_rendement_moyen":23.85248485,"Rendements_moyens_pente (hl/ha/an)":0.371818182},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960213677344924,47.194990893066375],[4.960434254738423,47.19493235498227],[4.961016575093736,47.19589912528342],[4.960796422733688,47.19596070933322],[4.960213677344924,47.194990893066375]]]]}},{"type":"Feature","properties":{"fid":58,"ID_1":"BMI 73-82","Parcelle":"Pressoir","Surface":0.11500140244745416,"Rendements_moyens_rendement_moyen":20.62629371,"Rendements_moyens_pente (hl/ha/an)":1.081818182},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960434254738423,47.19493235498227],[4.960556975351538,47.19489592455614],[4.961001925495758,47.19563900421144],[4.961112364911117,47.19584236471076],[4.961110954139151,47.19586982292468],[4.961016575093736,47.19589912528342],[4.960434254738423,47.19493235498227]]]]}},{"type":"Feature","properties":{"fid":59,"ID_1":"BMI 83-100","Parcelle":"Eglise","Surface":0.15631666455417872,"Rendements_moyens_rendement_moyen":25.73881061,"Rendements_moyens_pente (hl/ha/an)":-0.73},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960556975351538,47.19489592455616],[4.960775278594777,47.194835737063464],[4.961202625622272,47.19555283257467],[4.961008026474842,47.19564730226234],[4.960556975351538,47.19489592455616]]]]}},{"type":"Feature","properties":{"fid":60,"ID_1":"BMI 101-130","Parcelle":"Eglise","Surface":0.13267011891957373,"Rendements_moyens_rendement_moyen":22.83011932,"Rendements_moyens_pente (hl/ha/an)":-0.074545455},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960775278594777,47.194835737063464],[4.961093427736732,47.19474884623256],[4.961254522215605,47.19494588066429],[4.961328008595725,47.19506434024989],[4.961051608265859,47.195166244323694],[4.961132327124885,47.19531797495942],[4.96111596880946,47.195328668679096],[4.961236490023377,47.19553113817839],[4.961202625622272,47.19555283257467],[4.960775278594777,47.194835737063464]]]]}},{"type":"Feature","properties":{"fid":61,"ID_1":"HMI 1-18","Parcelle":"Ballonge 1","Surface":0.20389187906384468,"Rendements_moyens_rendement_moyen":34.3534686,"Rendements_moyens_pente (hl/ha/an)":-1.171818182},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959321484131145,47.19522858568574],[4.959532206641634,47.19517133121208],[4.960121740006809,47.19614835974093],[4.959907447647903,47.1962074717563],[4.959321484131145,47.19522858568574]]]]}},{"type":"Feature","properties":{"fid":62,"ID_1":"HMI 19-39","Parcelle":"Ballonge 1","Surface":0.24197528535425664,"Rendements_moyens_rendement_moyen":30.56757287,"Rendements_moyens_pente (hl/ha/an)":-1.374545455},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959071470829516,47.19530040881599],[4.959321484131144,47.195228585685754],[4.959907447647903,47.1962074717563],[4.959655382309645,47.196278038488494],[4.959071470829516,47.19530040881599]]]]}},{"type":"Feature","properties":{"fid":63,"ID_1":"HMI 40-57","Parcelle":"Citeaux 1","Surface":0.21587072144001723,"Rendements_moyens_rendement_moyen":20.73367003,"Rendements_moyens_pente (hl/ha/an)":-0.729090909},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958845602287369,47.195361261118315],[4.959071470829516,47.19530040881599],[4.959655382309645,47.196278038488494],[4.959429060041962,47.1963381096297],[4.958845602287369,47.195361261118315]]]]}},{"type":"Feature","properties":{"fid":64,"ID_1":"HMI 58-79","Parcelle":"Citeaux 1","Surface":0.25004966425299646,"Rendements_moyens_rendement_moyen":25.37081714,"Rendements_moyens_pente (hl/ha/an)":-1.091818182},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958586412769172,47.195430948060626],[4.958845602287369,47.195361261118315],[4.959429060041961,47.196338109629686],[4.95916889266208,47.19641377531595],[4.958586412769172,47.195430948060626]]]]}},{"type":"Feature","properties":{"fid":65,"ID_1":"HMI 80-97","Parcelle":"Plantation 2011","Surface":0.21801918537169696,"Rendements_moyens_rendement_moyen":27.14741259,"Rendements_moyens_pente (hl/ha/an)":-0.541818182},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958359441097477,47.19549525350686],[4.958586412769172,47.195430948060626],[4.95916889266208,47.19641377531595],[4.958942411849755,47.19647433894603],[4.958359441097477,47.19549525350686]]]]}},{"type":"Feature","properties":{"fid":66,"ID_1":"HMI 98-118","Parcelle":"Vergy","Surface":0.21886208997815848,"Rendements_moyens_rendement_moyen":0.0,"Rendements_moyens_pente (hl/ha/an)":0.0},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958146135212531,47.19555108971714],[4.958359441097477,47.19549525350686],[4.958942411849755,47.19647433894603],[4.958726430409382,47.196522465723646],[4.958573856579529,47.19629727362612],[4.958464297594237,47.196137608318054],[4.958389736048151,47.19602033845047],[4.958258376739574,47.19577984507535],[4.958146135212531,47.19555108971714]]]]}},{"type":"Feature","properties":{"fid":67,"ID_1":"BLA 1-18","Parcelle":"Bernardines","Surface":0.16896644494831561,"Rendements_moyens_rendement_moyen":20.5378101,"Rendements_moyens_pente (hl/ha/an)":-0.720909091},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960367767288727,47.19611423757614],[4.960153862800322,47.19617413545776],[4.96064419512246,47.196982461893136],[4.960855001646817,47.19692518859951],[4.960367767288727,47.19611423757614]]]]}},{"type":"Feature","properties":{"fid":68,"ID_1":"BLA 19-36","Parcelle":"Bernardines","Surface":0.17025569743067026,"Rendements_moyens_rendement_moyen":21.59259798,"Rendements_moyens_pente (hl/ha/an)":-0.287272727},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960367767288727,47.19611423757614],[4.960581856516228,47.19605244460813],[4.961065317306409,47.19686324783698],[4.960855001646817,47.19692518859951],[4.960367767288727,47.19611423757614]]]]}},{"type":"Feature","properties":{"fid":69,"ID_1":"BLA 37-54","Parcelle":"Bernardines","Surface":0.18252567283958196,"Rendements_moyens_rendement_moyen":19.0290101,"Rendements_moyens_pente (hl/ha/an)":-0.21},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960581856516228,47.19605244460813],[4.960814673744843,47.195991811518184],[4.961286837782809,47.19677467930649],[4.961065317306409,47.19686324783698],[4.960581856516228,47.19605244460813]]]]}},{"type":"Feature","properties":{"fid":70,"ID_1":"BLA 55-72","Parcelle":"Bernardines","Surface":0.16358873167186974,"Rendements_moyens_rendement_moyen":21.00945455,"Rendements_moyens_pente (hl/ha/an)":-0.460909091},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.960814673744843,47.195991811518184],[4.961028703471204,47.19592968510745],[4.961491260625354,47.196702087657464],[4.961286837782809,47.19677467930649],[4.960814673744843,47.195991811518184]]]]}},{"type":"Feature","properties":{"fid":71,"ID_1":"BLA 73-81","Parcelle":"Bernardines","Surface":0.08387724686879665,"Rendements_moyens_rendement_moyen":23.38189899,"Rendements_moyens_pente (hl/ha/an)":-0.052727273},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.961028703471204,47.19592968510745],[4.961128500388665,47.19590788381095],[4.961156004712953,47.1959265967198],[4.961598375408618,47.19666081441167],[4.961491260625354,47.196702087657464],[4.961028703471204,47.19592968510745]]]]}},{"type":"Feature","properties":{"fid":72,"ID_1":"BLA 82-99","Parcelle":"La Forge","Surface":0.14819185106679797,"Rendements_moyens_rendement_moyen":33.33198336,"Rendements_moyens_pente (hl/ha/an)":-2.341818182},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.961156004712953,47.1959265967198],[4.961210319350505,47.195950359223254],[4.961396527662595,47.195902189559526],[4.961801382106246,47.1965743444409],[4.961598375408618,47.196660814411665],[4.961156004712953,47.1959265967198]]]]}},{"type":"Feature","properties":{"fid":73,"ID_1":"BLA 100-125","Parcelle":"La Forge","Surface":0.16587012244910002,"Rendements_moyens_rendement_moyen":37.75127273,"Rendements_moyens_pente (hl/ha/an)":-0.917272727},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.961396527662595,47.195902189559526],[4.961562204532363,47.19586195436134],[4.961739285282674,47.1958602158371],[4.961780474201992,47.19593799642798],[4.961979910070638,47.19650867683348],[4.961801382106246,47.1965743444409],[4.961396527662595,47.195902189559526]]]]}},{"type":"Feature","properties":{"fid":74,"ID_1":"HLA 1-18","Parcelle":"Ballonge 2","Surface":0.1791795507416129,"Rendements_moyens_rendement_moyen":0.0,"Rendements_moyens_pente (hl/ha/an)":0.0},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.95991693110012,47.196237961454685],[4.960140366588067,47.19617686933865],[4.960629323962218,47.19699042914453],[4.960400136884799,47.197048368097164],[4.95991693110012,47.196237961454685]]]]}},{"type":"Feature","properties":{"fid":75,"ID_1":"HLA 19-35","Parcelle":"Ballonge 2","Surface":0.1578369981184602,"Rendements_moyens_rendement_moyen":0.0,"Rendements_moyens_pente (hl/ha/an)":0.0},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959717537655565,47.19629128329835],[4.95991693110012,47.19623796145469],[4.960400136884799,47.197048368097164],[4.960200740916584,47.19710169075601],[4.959717537655565,47.19629128329835]]]]}},{"type":"Feature","properties":{"fid":76,"ID_1":"HLA 36-53","Parcelle":"Citeaux 2","Surface":0.1731336652804166,"Rendements_moyens_rendement_moyen":25.91741414,"Rendements_moyens_pente (hl/ha/an)":-0.809090909},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959500518479055,47.196356690331804],[4.959717537655565,47.19629128329835],[4.960200740916584,47.19710169075601],[4.96014212806485,47.197116024566625],[4.960040273081582,47.197137230648714],[4.959969159673337,47.197143513762015],[4.959500518479055,47.196356690331804]]]]}},{"type":"Feature","properties":{"fid":77,"ID_1":"HLA 54-71","Parcelle":"Citeaux 2","Surface":0.1664565692515578,"Rendements_moyens_rendement_moyen":22.64145455,"Rendements_moyens_pente (hl/ha/an)":-0.754545455},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959284750539062,47.19641573040504],[4.959500518479055,47.19635669033181],[4.959969159673337,47.197143513762015],[4.959963463887264,47.19715240915184],[4.959747856470397,47.19719465135721],[4.959284750539062,47.19641573040504]]]]}},{"type":"Feature","properties":{"fid":78,"ID_1":"HLA 72-89","Parcelle":"Cabotte","Surface":0.1598244547635317,"Rendements_moyens_rendement_moyen":28.48,"Rendements_moyens_pente (hl/ha/an)":2.6},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.959069283752189,47.196478710620596],[4.959284750539062,47.19641573040504],[4.959747856470397,47.19719465135721],[4.959495913683383,47.19719768485516],[4.959069283752189,47.196478710620596]]]]}},{"type":"Feature","properties":{"fid":79,"ID_1":"HLA 90-107","Parcelle":"Cabotte","Surface":0.14306713116467,"Rendements_moyens_rendement_moyen":26.2656,"Rendements_moyens_pente (hl/ha/an)":2.25},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.958855219084245,47.19653729415988],[4.959069283752189,47.196478710620596],[4.959495913683383,47.19719768485516],[4.959234491877682,47.19717912534208],[4.958855219084245,47.19653729415988]]]]}},{"type":"Feature","properties":{"fid":80,"ID_1":"HLA 108-fin","Parcelle":"Cabotte","Surface":0.13628875831232873,"Rendements_moyens_rendement_moyen":21.9648,"Rendements_moyens_pente (hl/ha/an)":4.65},"geometry":{"type":"MultiPolygon","coordinates":[[[[4.95876215477004,47.196563520771385],[4.958855219084245,47.19653729415988],[4.959234491877682,47.19717912534208],[4.958951302012015,47.197179120024444],[4.958817109998508,47.19714329244114],[4.958779667219982,47.19707824250156],[4.958780642855049,47.197030397442155],[4.958801368154567,47.19697928179369],[4.95881257462575,47.196875755154565],[4.95874634516945,47.196589864972864],[4.95876215477004,47.196563520771385]]]]}}]};
+const parcelleZones = [
+  {parcelle:"ballonge_1", zone:"HMI 1-18"},
+  {parcelle:"ballonge_1", zone:"HMI 19-39"},
+  {parcelle:"ballonge_2", zone:"HLA 1-18"},
+  {parcelle:"ballonge_2", zone:"HLA 19-35"},
+  {parcelle:"bernardines", zone:"BLA 1-18"},
+  {parcelle:"bernardines", zone:"BLA 19-36"},
+  {parcelle:"bernardines", zone:"BLA 37-54"},
+  {parcelle:"bernardines", zone:"BLA 55-72"},
+  {parcelle:"bernardines", zone:"BLA 73-81"},
+  {parcelle:"bonnes_mares", zone:"HBM 35-52"},
+  {parcelle:"bonnes_mares", zone:"HBM 53-70"},
+  {parcelle:"bonnes_mares", zone:"HBM 71-88"},
+  {parcelle:"bonnes_mares", zone:"HBM 89-106"},
+  {parcelle:"bonnes_mares", zone:"HBM 107-129"},
+  {parcelle:"cabotte", zone:"HLA 72-89"},
+  {parcelle:"cabotte", zone:"HLA 90-107"},
+  {parcelle:"cabotte", zone:"HLA 108-fin"},
+  {parcelle:"citeaux_1", zone:"HMI 40-57"},
+  {parcelle:"citeaux_1", zone:"HMI 58-79"},
+  {parcelle:"citeaux_2", zone:"HLA 36-53"},
+  {parcelle:"citeaux_2", zone:"HLA 54-71"},
+  {parcelle:"eglise", zone:"BMI 83-100"},
+  {parcelle:"eglise", zone:"BMI 101-130"},
+  {parcelle:"jeanniard", zone:"HBM 1-18"},
+  {parcelle:"jeanniard", zone:"HBM 19-34"},
+  {parcelle:"la_forge", zone:"BLA 82-99"},
+  {parcelle:"la_forge", zone:"BLA 100-125"},
+  {parcelle:"les_loups", zone:"BBM 21-38"},
+  {parcelle:"les_loups", zone:"BBM 39-56"},
+  {parcelle:"les_loups", zone:"BBM 57-74"},
+  {parcelle:"les_loups", zone:"BBM 75-83"},
+  {parcelle:"les_ruchots", zone:"BBM 84-103"},
+  {parcelle:"les_ruchots", zone:"BBM 104-124"},
+  {parcelle:"plantation_2005", zone:"BBM 1-20"},
+  {parcelle:"plantation_2011", zone:"HMI 80-97"},
+  {parcelle:"pressoir", zone:"BMI 1-18"},
+  {parcelle:"pressoir", zone:"BMI 19-36"},
+  {parcelle:"pressoir", zone:"BMI 37-54"},
+  {parcelle:"pressoir", zone:"BMI 55-72"},
+  {parcelle:"pressoir", zone:"BMI 73-82"},
+  {parcelle:"vergy", zone:"HMI 98-118"}
+];
+const PROPERTY_PARCELLE = "ID_1";
+const CATEGORIES = [
+  { id:"0_grappes", field:"0_grappes", name:"0 grappes", color:"#991b1b" },
+  { id:"1_2_grappes", field:"1_2_grappes", name:"1-2 grappes", color:"#f97316" },
+  { id:"2_6_grappes", field:"2_6_grappes", name:"2-6 grappes", color:"#ca8a04" },
+  { id:"6_10_grappes", field:"6_10_grappes", name:"6-10 grappes", color:"#15803d" },
+  { id:"plus_de_10_grappes", field:"plus_de_10_grappes", name:">10 grappes", color:"#1d4ed8" }
+];
+
+const STORAGE_KEY = "comptage_fertilite_gps_points_CdT_v1";
+const DRAFT_KEY = "comptage_fertilite_gps_draft_CdT_v1";
+
+let map, allParcelsLayer, selectedParcelLayer, observationsLayer, gpsMarker;
+let selectedFeature = null;
+let lastGps = null;
+let gpsWatchId = null;
+let observations = loadObservations();
+let counts = Object.fromEntries(CATEGORIES.map(c => [c.id, 0]));
+
+function init() {
+  populateParcelles();
+  buildCounters();
+  initMap();
+  loadDraft();
+  updateZoneSelect(false);
+  updateSelectedParcel();
+  recomputeCounts();
+  renderObservations();
+  bindInputs();
+}
+
+function uniqueParcelles() {
+  return [...new Set(parcelleZones.map(item => item.parcelle))]
+    .sort((a,b) => a.localeCompare(b, "fr", { numeric:true }));
+}
+
+function getParcelName(feature) {
+  return feature && feature.properties ? String(feature.properties[PROPERTY_PARCELLE] ?? "") : "";
+}
+
+function getSurface(feature) {
+  if (!feature || !feature.properties) return "";
+  return feature.properties.Surface ?? feature.properties.surface ?? "";
+}
+
+function getCurrentNomParcelle() {
+  return document.getElementById("nomParcelle")?.value || "";
+}
+
+function getCurrentZone() {
+  return document.getElementById("parcelle")?.value || "";
+}
+
+function zoneOfObservation(o) {
+  return o.id_zone || o.Parcelle_selectionnee || "";
+}
+
+function populateParcelles() {
+  const select = document.getElementById("nomParcelle");
+  select.innerHTML = uniqueParcelles()
+    .map(p => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`)
+    .join("");
+  updateZoneSelect(false);
+}
+
+function updateZoneSelect(keepCurrent = true) {
+  const nom = getCurrentNomParcelle();
+  const zoneSelect = document.getElementById("parcelle");
+  const previous = zoneSelect.value;
+  const zones = parcelleZones
+    .filter(item => item.parcelle === nom)
+    .map(item => item.zone);
+  zoneSelect.innerHTML = zones
+    .map(z => `<option value="${escapeAttr(z)}">${escapeHtml(z)}</option>`)
+    .join("");
+  if (keepCurrent && zones.includes(previous)) zoneSelect.value = previous;
+  const missingGeo = zones.filter(z => !PARCELLAIRE.features.some(f => getParcelName(f) === z));
+  document.getElementById("zoneHelp").textContent = zones.length + " id_zone disponible(s)" + (missingGeo.length ? " — attention : " + missingGeo.length + " sans contour GeoJSON." : ".");
+  updateSelectedParcel();
+}
+
+function buildCounters() {
+  const checks = document.getElementById("checks");
+  const counters = document.getElementById("counters");
+  checks.innerHTML = CATEGORIES.map(c => `
+    <label class="check-item">
+      <input type="checkbox" checked onchange="toggleCounter('${c.id}', this.checked)">
+      <span><span class="dot" style="background:${c.color}"></span> ${escapeHtml(c.name)}</span>
+    </label>
+  `).join("");
+
+  counters.innerHTML = CATEGORIES.map(c => `
+    <div class="counter active" id="counter_${c.id}">
+      <div class="counter-title"><span class="dot" style="background:${c.color}"></span>${escapeHtml(c.name)}</div>
+      <div class="counter-row">
+        <button class="minus" type="button" onclick="minusObservation('${c.id}')">−</button>
+        <div class="value" id="value_${c.id}">0</div>
+        <button class="plus" type="button" onclick="addObservation('${c.id}')">+</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function initMap() {
+  map = L.map("map", { zoomControl: true });
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 21,
+    attribution: "&copy; OpenStreetMap"
+  }).addTo(map);
+
+  allParcelsLayer = L.geoJSON(PARCELLAIRE, {
+    style: { color:"#6b7280", weight:1, fillColor:"#9ca3af", fillOpacity:0.08 },
+    onEachFeature: (feature, layer) => {
+      layer.bindPopup(`<strong>ID_1 : ${escapeHtml(getParcelName(feature))}</strong><br>Parcelle : ${escapeHtml(feature.properties.Parcelle || "")}<br>Surface : ${escapeHtml(getSurface(feature) ?? "")} ha`);
+    }
+  }).addTo(map);
+
+  selectedParcelLayer = L.geoJSON(null, {
+    style: { color:"#1d4ed8", weight:3, fillColor:"#60a5fa", fillOpacity:0.18 }
+  }).addTo(map);
+
+  observationsLayer = L.layerGroup().addTo(map);
+  try {
+    map.fitBounds(allParcelsLayer.getBounds(), { padding:[20,20] });
+  } catch(e) {}
+}
+
+function bindInputs() {
+  document.getElementById("nomParcelle").addEventListener("change", () => {
+    updateZoneSelect(false);
+    saveDraft();
+    recomputeCounts();
+    renderObservations();
+  });
+  document.getElementById("parcelle").addEventListener("change", () => {
+    updateSelectedParcel();
+    saveDraft();
+    recomputeCounts();
+    renderObservations();
+  });
+  ["rang","operateur","commentaire"].forEach(id => {
+    document.getElementById(id).addEventListener("input", saveDraft);
+  });
+  window.addEventListener("pagehide", saveDraft);
+}
+
+function updateSelectedParcel() {
+  const zone = getCurrentZone();
+  selectedFeature = PARCELLAIRE.features.find(f => getParcelName(f) === zone) || null;
+  if (selectedParcelLayer) selectedParcelLayer.clearLayers();
+  if (selectedFeature && selectedParcelLayer) {
+    selectedParcelLayer.addData(selectedFeature);
+    centerOnSelectedParcel();
+  }
+}
+
+function centerOnSelectedParcel() {
+  if (!selectedFeature || !map) return;
+  const tmp = L.geoJSON(selectedFeature);
+  map.fitBounds(tmp.getBounds(), { padding:[20,20] });
+}
+
+function startGpsWatch() {
+  if (!navigator.geolocation) {
+    setGpsStatus("La géolocalisation n'est pas disponible sur ce navigateur.", "err");
+    return;
+  }
+  setGpsStatus("Recherche GPS en cours…", "warn");
+  if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+  gpsWatchId = navigator.geolocation.watchPosition(pos => {
+    lastGps = {
+      lon: pos.coords.longitude,
+      lat: pos.coords.latitude,
+      accuracy: Math.round(pos.coords.accuracy),
+      timestamp: new Date().toISOString()
+    };
+    setGpsStatus(`GPS OK — précision ±${lastGps.accuracy} m — ${new Date().toLocaleTimeString("fr-FR")}`, lastGps.accuracy <= 15 ? "ok" : "warn");
+    updateGpsMarker();
+  }, err => {
+    setGpsStatus("GPS refusé ou indisponible. Sur iPhone : Réglages → Confidentialité et sécurité → Service de localisation → Safari → Autoriser. Détail : " + err.message, "err");
+  }, {
+    enableHighAccuracy: true,
+    maximumAge: 5000,
+    timeout: 10000
+  });
+}
+
+function updateGpsMarker() {
+  if (!lastGps || !map) return;
+  const latlng = [lastGps.lat, lastGps.lon];
+  if (!gpsMarker) {
+    gpsMarker = L.circleMarker(latlng, { radius:7, color:"#111827", fillColor:"#22c55e", fillOpacity:0.9, weight:2 }).addTo(map);
+  } else {
+    gpsMarker.setLatLng(latlng);
+  }
+  gpsMarker.bindPopup(`Position téléphone<br>Précision ±${lastGps.accuracy} m`);
+}
+
+function setGpsStatus(msg, type) {
+  const el = document.getElementById("gpsStatus");
+  el.textContent = msg;
+  el.className = "status " + type;
+}
+
+function getCurrentGps() {
+  return new Promise(resolve => {
+    const now = Date.now();
+    if (lastGps && (now - Date.parse(lastGps.timestamp)) < 12000) {
+      resolve({ ok:true, gps:lastGps, source:"lastGps" });
+      return;
+    }
+    if (!navigator.geolocation) {
+      resolve({ ok:false, error:"GPS non disponible" });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(pos => {
+      const gps = {
+        lon: pos.coords.longitude,
+        lat: pos.coords.latitude,
+        accuracy: Math.round(pos.coords.accuracy),
+        timestamp: new Date().toISOString()
+      };
+      lastGps = gps;
+      updateGpsMarker();
+      setGpsStatus(`GPS OK — précision ±${gps.accuracy} m`, gps.accuracy <= 15 ? "ok" : "warn");
+      resolve({ ok:true, gps, source:"instant" });
+    }, err => {
+      resolve({ ok:false, error:err.message });
+    }, {
+      enableHighAccuracy: true,
+      maximumAge: 5000,
+      timeout: 7000
+    });
+  });
+}
+
+async function addObservation(catId) {
+  const cat = CATEGORIES.find(c => c.id === catId);
+  if (!cat) return;
+  if (!selectedFeature) {
+    alert("Aucun contour GeoJSON trouvé pour l’id_zone sélectionné : " + getCurrentZone());
+    return;
+  }
+  const now = getNowParts();
+  const gpsResult = await getCurrentGps();
+
+  let rawPoint, rawLat = "", rawLon = "", accuracy = "", gpsStatus = "ok";
+  if (gpsResult.ok) {
+    rawLon = gpsResult.gps.lon;
+    rawLat = gpsResult.gps.lat;
+    accuracy = gpsResult.gps.accuracy;
+    rawPoint = turf.point([rawLon, rawLat]);
+  } else {
+    gpsStatus = "erreur";
+    rawPoint = turf.centroid(selectedFeature);
+    rawLon = rawPoint.geometry.coordinates[0];
+    rawLat = rawPoint.geometry.coordinates[1];
+    accuracy = "";
+    setGpsStatus("GPS indisponible : point placé au centre de l’id_zone.", "err");
+  }
+
+  const forced = forcePointIntoSelectedParcel(rawPoint, selectedFeature);
+  const p = forced.point.geometry.coordinates;
+  const obs = {
+    id: now.timestamp + "_" + Math.random().toString(16).slice(2),
+    timestamp: now.timestamp,
+    Date: now.dateISO,
+    Heure: now.heure,
+    Type_comptage: "fertilite_gps",
+    nom_parcelle: getCurrentNomParcelle(),
+    id_zone: getCurrentZone(),
+    Parcelle_selectionnee: getCurrentZone(),
+    Rang_ou_secteur: document.getElementById("rang").value,
+    Operateur: document.getElementById("operateur").value,
+    Categorie: cat.name,
+    Categorie_id: cat.id,
+    Champ_export: cat.field,
+    Latitude_GPS_brute: rawLat,
+    Longitude_GPS_brute: rawLon,
+    Latitude_corrigee: p[1],
+    Longitude_corrigee: p[0],
+    Precision_GPS_m: accuracy,
+    Correction_appliquee: forced.corrected ? "oui" : "non",
+    Distance_correction_m: Math.round(forced.distance_m || 0),
+    Statut_GPS: gpsStatus,
+    Commentaire: document.getElementById("commentaire").value
+  };
+
+  if (accuracy !== "" && Number(accuracy) > 30) {
+    setGpsStatus(`Précision GPS faible : ±${accuracy} m. Le point est quand même enregistré.`, "warn");
+  }
+
+  observations.push(obs);
+  saveObservations();
+  recomputeCounts();
+  renderObservations();
+  addObservationMarker(obs, true);
+
+  if (forced.corrected && forced.distance_m > 50) {
+    setGpsStatus(`Point forcé dans l’id_zone, mais GPS éloigné d’environ ${Math.round(forced.distance_m)} m. Vérifie la zone sélectionnée.`, "warn");
+  }
+}
+
+function forcePointIntoSelectedParcel(point, feature) {
+  try {
+    if (turf.booleanPointInPolygon(point, feature, { ignoreBoundary:false })) {
+      return { point, corrected:false, distance_m:0 };
+    }
+    const line = turf.polygonToLine(feature);
+    const nearest = turf.nearestPointOnLine(line, point, { units:"meters" });
+    let correctedPoint = nearest;
+    const centroid = turf.centroid(feature);
+    const nc = nearest.geometry.coordinates;
+    const cc = centroid.geometry.coordinates;
+    const nudged = [nc[0] + (cc[0] - nc[0]) * 0.0005, nc[1] + (cc[1] - nc[1]) * 0.0005];
+    const nudgedPoint = turf.point(nudged);
+    if (turf.booleanPointInPolygon(nudgedPoint, feature, { ignoreBoundary:false })) correctedPoint = nudgedPoint;
+    return { point: correctedPoint, corrected:true, distance_m: turf.distance(point, correctedPoint, { units:"meters" }) };
+  } catch(e) {
+    console.warn(e);
+    const c = turf.centroid(feature);
+    return { point:c, corrected:true, distance_m:0 };
+  }
+}
+
+function minusObservation(catId) {
+  const zone = getCurrentZone();
+  for (let i = observations.length - 1; i >= 0; i--) {
+    if (zoneOfObservation(observations[i]) === zone && observations[i].Categorie_id === catId) {
+      observations.splice(i, 1);
+      saveObservations();
+      recomputeCounts();
+      renderObservations();
+      return;
+    }
+  }
+  alert("Aucun point à supprimer pour cette catégorie sur l’id_zone sélectionné.");
+}
+
+function deleteLastObservation() {
+  if (observations.length === 0) return alert("Aucune observation.");
+  const last = observations[observations.length - 1];
+  if (!confirm("Supprimer le dernier point : " + last.Categorie + " / " + (last.nom_parcelle || "") + " / " + zoneOfObservation(last) + " ?")) return;
+  observations.pop();
+  saveObservations();
+  recomputeCounts();
+  renderObservations();
+}
+
+function resetCurrentZone() {
+  const zone = getCurrentZone();
+  const n = observations.filter(o => zoneOfObservation(o) === zone).length;
+  if (n === 0) return alert("Aucun point sur cet id_zone.");
+  if (!confirm("Supprimer les " + n + " point(s) de l’id_zone " + zone + " ?")) return;
+  observations = observations.filter(o => zoneOfObservation(o) !== zone);
+  saveObservations();
+  recomputeCounts();
+  renderObservations();
+}
+
+function clearAllObservations() {
+  if (observations.length === 0) return alert("Aucune observation.");
+  if (!confirm("Effacer définitivement tous les points enregistrés sur cet appareil ?")) return;
+  observations = [];
+  saveObservations();
+  recomputeCounts();
+  renderObservations();
+}
+
+function recomputeCounts() {
+  const zone = getCurrentZone();
+  counts = Object.fromEntries(CATEGORIES.map(c => [c.id, 0]));
+  observations.filter(o => zoneOfObservation(o) === zone).forEach(o => {
+    if (counts[o.Categorie_id] != null) counts[o.Categorie_id] += 1;
+  });
+  CATEGORIES.forEach(c => {
+    const el = document.getElementById("value_" + c.id);
+    if (el) el.textContent = counts[c.id] || 0;
+  });
+}
+
+function renderObservations() {
+  if (!observationsLayer) return;
+  observationsLayer.clearLayers();
+  observations.forEach(o => addObservationMarker(o, false));
+
+  const summary = document.getElementById("savedSummary");
+  const list = document.getElementById("savedList");
+  const zone = getCurrentZone();
+  const obsZone = observations.filter(o => zoneOfObservation(o) === zone);
+  const totalZone = obsZone.length;
+  summary.textContent = `${observations.length} point(s) au total — ${totalZone} sur l’id_zone sélectionné.`;
+
+  const recent = observations.slice(-14).reverse();
+  list.innerHTML = recent.map(o => `
+    <div class="saved-item">
+      <strong>${escapeHtml(o.Categorie)}</strong> — ${escapeHtml(o.nom_parcelle || "")} / ${escapeHtml(zoneOfObservation(o))}<br>
+      ${escapeHtml(o.Date)} ${escapeHtml(o.Heure)} — ${escapeHtml(o.Rang_ou_secteur || "sans rang/secteur")}<br>
+      GPS ±${escapeHtml(o.Precision_GPS_m || "NA")} m — correction : ${escapeHtml(o.Correction_appliquee)}
+    </div>
+  `).join("");
+}
+
+function addObservationMarker(o, pan) {
+  if (!observationsLayer) return;
+  const lat = Number(o.Latitude_corrigee);
+  const lon = Number(o.Longitude_corrigee);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  const cat = CATEGORIES.find(c => c.id === o.Categorie_id) || CATEGORIES[0];
+  const marker = L.circleMarker([lat, lon], {
+    radius: 7,
+    color: "#111827",
+    weight: 1,
+    fillColor: cat.color,
+    fillOpacity: 0.9
+  });
+  marker.bindPopup(`
+    <strong>${escapeHtml(o.Categorie)}</strong><br>
+    Parcelle : ${escapeHtml(o.nom_parcelle || "")}<br>
+    id_zone : ${escapeHtml(zoneOfObservation(o))}<br>
+    Rang/secteur : ${escapeHtml(o.Rang_ou_secteur || "")}<br>
+    GPS ±${escapeHtml(o.Precision_GPS_m || "NA")} m<br>
+    Correction : ${escapeHtml(o.Correction_appliquee)} (${escapeHtml(o.Distance_correction_m)} m)
+  `);
+  observationsLayer.addLayer(marker);
+  if (pan && map) map.panTo(marker.getLatLng());
+}
+
+function toggleCounter(id, visible) {
+  const el = document.getElementById("counter_" + id);
+  if (!el) return;
+  el.style.display = visible ? "block" : "none";
+}
+
+function showAllCounters() {
+  document.querySelectorAll(".check-item input").forEach(cb => cb.checked = true);
+  CATEGORIES.forEach(c => toggleCounter(c.id, true));
+}
+
+function exportCSV() {
+  if (observations.length === 0) return alert("Aucune observation à exporter.");
+  const headers = ["Date","Heure","timestamp","Type_comptage","nom_parcelle","id_zone","Rang_ou_secteur","Operateur","Categorie","Champ_export","Latitude_GPS_brute","Longitude_GPS_brute","Latitude_corrigee","Longitude_corrigee","Precision_GPS_m","Correction_appliquee","Distance_correction_m","Statut_GPS","Commentaire"];
+  const rows = observations.map(o => headers.map(h => o[h] ?? (h === "id_zone" ? zoneOfObservation(o) : "")));
+  downloadText("comptage_fertilite_gps_points_" + today() + ".csv", toCSV(headers, rows), "text/csv;charset=utf-8;");
+}
+
+function exportSummaryCSV() {
+  if (observations.length === 0) return alert("Aucune observation à exporter.");
+  const byKey = {};
+  observations.forEach(o => {
+    const key = (o.nom_parcelle || "") + "||" + zoneOfObservation(o) + "||" + (o.Rang_ou_secteur || "");
+    if (!byKey[key]) {
+      byKey[key] = { nom_parcelle:o.nom_parcelle || "", id_zone:zoneOfObservation(o), Rang_ou_secteur:o.Rang_ou_secteur || "" };
+      CATEGORIES.forEach(c => byKey[key][c.field] = 0);
+    }
+    const cat = CATEGORIES.find(c => c.id === o.Categorie_id);
+    if (cat) byKey[key][cat.field] = (byKey[key][cat.field] || 0) + 1;
+  });
+  const headers = ["nom_parcelle","id_zone","Rang_ou_secteur", ...CATEGORIES.map(c => c.field), "Total_pieds_observes"];
+  const rows = Object.values(byKey).map(r => {
+    const total = CATEGORIES.reduce((s,c) => s + Number(r[c.field] || 0), 0);
+    return [r.nom_parcelle, r.id_zone, r.Rang_ou_secteur, ...CATEGORIES.map(c => r[c.field] || 0), total];
+  });
+  downloadText("comptage_fertilite_gps_synthese_" + today() + ".csv", toCSV(headers, rows), "text/csv;charset=utf-8;");
+}
+
+function exportGeoJSON() {
+  if (observations.length === 0) return alert("Aucune observation à exporter.");
+  const fc = {
+    type:"FeatureCollection",
+    name:"observations_comptage_fertilite_gps",
+    crs: { type:"name", properties:{ name:"EPSG:4326" } },
+    features: observations.map(o => ({
+      type:"Feature",
+      properties: { ...o, id_zone: zoneOfObservation(o) },
+      geometry: { type:"Point", coordinates:[Number(o.Longitude_corrigee), Number(o.Latitude_corrigee)] }
+    }))
+  };
+  downloadText("comptage_fertilite_gps_points_" + today() + ".geojson", JSON.stringify(fc, null, 2), "application/geo+json;charset=utf-8;");
+}
+
+function toCSV(headers, rows) {
+  const csv = headers.map(csvEscape).join(";") + "\n" + rows.map(row => row.map(csvEscape).join(";")).join("\n") + "\n";
+  return "\ufeff" + csv;
+}
+
+function csvEscape(v) {
+  const s = String(v ?? "");
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+
+function downloadText(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function loadObservations() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }
+  catch(e) { return []; }
+}
+
+function saveObservations() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(observations));
+  saveDraft();
+}
+
+function saveDraft() {
+  const draft = {
+    nomParcelle: getCurrentNomParcelle(),
+    zone: getCurrentZone(),
+    rang: document.getElementById("rang")?.value || "",
+    operateur: document.getElementById("operateur")?.value || "",
+    commentaire: document.getElementById("commentaire")?.value || "",
+    savedAt: new Date().toISOString()
+  };
+  localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+}
+
+function loadDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+    if (!draft) return;
+    if (draft.nomParcelle && [...document.getElementById("nomParcelle").options].some(o => o.value === draft.nomParcelle)) {
+      document.getElementById("nomParcelle").value = draft.nomParcelle;
+      updateZoneSelect(false);
+    }
+    if (draft.zone && [...document.getElementById("parcelle").options].some(o => o.value === draft.zone)) {
+      document.getElementById("parcelle").value = draft.zone;
+    }
+    document.getElementById("rang").value = draft.rang || "";
+    document.getElementById("operateur").value = draft.operateur || "";
+    document.getElementById("commentaire").value = draft.commentaire || "";
+  } catch(e) {}
+}
+
+function getNowParts() {
+  const now = new Date();
+  return {
+    dateISO: now.toISOString().slice(0,10),
+    heure: now.toTimeString().slice(0,8),
+    timestamp: now.toISOString()
+  };
+}
+
+function today() {
+  return new Date().toISOString().slice(0,10);
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function escapeAttr(s) {
+  return escapeHtml(s).replace(/`/g, "&#096;");
+}
+
+init();
+</script>
+</body>
+</html>
