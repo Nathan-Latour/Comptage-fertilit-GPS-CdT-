@@ -117,9 +117,10 @@ button.plus { font-size:30px; }
   display:grid;
   grid-template-columns:1fr;
   gap:10px;
-  position:sticky;
-  bottom:10px;
-  z-index:800;
+}
+.export-bottom {
+  margin-top:14px;
+  margin-bottom:28px;
 }
 .leaflet-popup-content { font-size:14px; }
 .export-panel {
@@ -146,7 +147,6 @@ button.plus { font-size:30px; }
   .layout { display:grid; grid-template-columns: 0.95fr 1.05fr; gap:12px; align-items:start; }
   #map { height: 72vh; min-height:620px; position:sticky; top:10px; }
   .grid2 { grid-template-columns:1fr 1fr; }
-  .actions { position:static; }
 }
 </style>
 </head>
@@ -213,18 +213,23 @@ button.plus { font-size:30px; }
       <button type="button" class="secondary" onclick="resetCurrentZone()" style="width:100%;margin-top:10px;">Remettre à zéro les compteurs de l’id_zone</button>
     </div>
 
-    <div class="actions">
-      <button type="button" class="export" onclick="exportCSV()">Exporter / partager CSV points GPS</button>
-      <button type="button" class="export" onclick="exportGeoJSON()">Exporter / partager GeoJSON QGIS</button>
-      <button type="button" class="info" onclick="exportSummaryCSV()">Exporter / partager synthèse fertilité</button>
-      <button type="button" class="secondary" onclick="copyCSVPoints()">Copier CSV points GPS</button>
-      <button type="button" class="secondary" onclick="copyGeoJSONPoints()">Copier GeoJSON QGIS</button>
-      <button type="button" class="secondary" onclick="copyBackupJSON()">Copier sauvegarde secours JSON</button>
-    </div>
   </div>
 
   <div>
     <div id="map"></div>
+  </div>
+</div>
+
+<div class="card export-bottom">
+  <label>Exports et récupération</label>
+  <div class="small">Ces boutons sont placés tout en bas pour ne pas gêner le comptage sur téléphone.</div>
+  <div class="actions">
+    <button type="button" class="export" onclick="exportCSV()">Exporter / partager CSV points GPS</button>
+    <button type="button" class="export" onclick="exportGeoJSON()">Exporter / partager GeoJSON QGIS</button>
+    <button type="button" class="info" onclick="exportSummaryCSV()">Exporter / partager synthèse fertilité</button>
+    <button type="button" class="secondary" onclick="copyCSVPoints()">Copier CSV points GPS</button>
+    <button type="button" class="secondary" onclick="copyGeoJSONPoints()">Copier GeoJSON QGIS</button>
+    <button type="button" class="secondary" onclick="copyBackupJSON()">Copier sauvegarde secours JSON</button>
   </div>
 </div>
 
@@ -825,9 +830,9 @@ async function exportFileSmart(filename, content, mimeType, title) {
   const canUseFile = typeof File !== "undefined";
   const file = canUseFile ? new File([blob], filename, { type:mimeType }) : null;
 
-  // iPhone, surtout application Google : le téléchargement Blob est souvent bloqué.
+  // Application Google iPhone : le téléchargement Blob est souvent bloqué.
   // On privilégie donc le partage iOS, puis la copie, puis un panneau manuel.
-  if (isIOS()) {
+  if (isGoogleAppIOS()) {
     if (file && navigator.canShare && navigator.canShare({ files:[file] }) && navigator.share) {
       try {
         await navigator.share({ files:[file], title:title || filename, text:"Export comptage fertilité GPS" });
@@ -845,10 +850,13 @@ async function exportFileSmart(filename, content, mimeType, title) {
     return;
   }
 
-  // Ordinateur / Android : téléchargement classique. Si cela ne marche pas,
+  // Safari / ordinateur : téléchargement classique. Si cela ne marche pas,
   // les boutons Copier restent disponibles dans l'application.
   try {
     downloadText(filename, content, mimeType);
+    setTimeout(() => {
+      if (isIOS()) alert("Si le fichier ne s'est pas ouvert/téléchargé, utilise le bouton Copier correspondant juste dessous.");
+    }, 500);
   } catch(e) {
     if (file && navigator.canShare && navigator.canShare({ files:[file] }) && navigator.share) {
       try {
