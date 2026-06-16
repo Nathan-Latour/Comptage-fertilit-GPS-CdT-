@@ -122,6 +122,25 @@ button.plus { font-size:30px; }
   z-index:800;
 }
 .leaflet-popup-content { font-size:14px; }
+.export-panel {
+  position:fixed;
+  left:10px;
+  right:10px;
+  bottom:10px;
+  z-index:2000;
+  background:#fff;
+  border:2px solid #111827;
+  border-radius:18px;
+  padding:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,.25);
+}
+.export-panel textarea {
+  min-height:220px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12px;
+  line-height:1.35;
+}
+.export-panel-title { font-weight:900; margin-bottom:6px; }
 @media (min-width:900px) {
   body { max-width:1180px; margin:auto; }
   .layout { display:grid; grid-template-columns: 0.95fr 1.05fr; gap:12px; align-items:start; }
@@ -195,9 +214,12 @@ button.plus { font-size:30px; }
     </div>
 
     <div class="actions">
-      <button type="button" class="export" onclick="exportCSV()">Exporter CSV points GPS</button>
-      <button type="button" class="export" onclick="exportGeoJSON()">Exporter GeoJSON QGIS</button>
-      <button type="button" class="info" onclick="exportSummaryCSV()">Exporter synthèse fertilité</button>
+      <button type="button" class="export" onclick="exportCSV()">Exporter / partager CSV points GPS</button>
+      <button type="button" class="export" onclick="exportGeoJSON()">Exporter / partager GeoJSON QGIS</button>
+      <button type="button" class="info" onclick="exportSummaryCSV()">Exporter / partager synthèse fertilité</button>
+      <button type="button" class="secondary" onclick="copyCSVPoints()">Copier CSV points GPS</button>
+      <button type="button" class="secondary" onclick="copyGeoJSONPoints()">Copier GeoJSON QGIS</button>
+      <button type="button" class="secondary" onclick="copyBackupJSON()">Copier sauvegarde secours JSON</button>
     </div>
   </div>
 
@@ -690,15 +712,13 @@ function showAllCounters() {
   CATEGORIES.forEach(c => toggleCounter(c.id, true));
 }
 
-function exportCSV() {
-  if (observations.length === 0) return alert("Aucune observation à exporter.");
+function buildCSVPointsContent() {
   const headers = ["Date","Heure","timestamp","Type_comptage","nom_parcelle","id_zone","Rang_ou_secteur","Operateur","Categorie","Champ_export","Latitude_GPS_brute","Longitude_GPS_brute","Latitude_corrigee","Longitude_corrigee","Precision_GPS_m","Correction_appliquee","Distance_correction_m","Statut_GPS","Commentaire"];
   const rows = observations.map(o => headers.map(h => o[h] ?? (h === "id_zone" ? zoneOfObservation(o) : "")));
-  downloadText("comptage_fertilite_gps_points_" + today() + ".csv", toCSV(headers, rows), "text/csv;charset=utf-8;");
+  return toCSV(headers, rows);
 }
 
-function exportSummaryCSV() {
-  if (observations.length === 0) return alert("Aucune observation à exporter.");
+function buildSummaryCSVContent() {
   const byKey = {};
   observations.forEach(o => {
     const key = (o.nom_parcelle || "") + "||" + zoneOfObservation(o) + "||" + (o.Rang_ou_secteur || "");
@@ -711,14 +731,13 @@ function exportSummaryCSV() {
   });
   const headers = ["nom_parcelle","id_zone","Rang_ou_secteur", ...CATEGORIES.map(c => c.field), "Total_pieds_observes"];
   const rows = Object.values(byKey).map(r => {
-    const total = CATEGORIES.reduce((s,c) => s + Number(r[c.field] || 0), 0);
+    const total = CATEGORIES.reduce((sum,c) => sum + Number(r[c.field] || 0), 0);
     return [r.nom_parcelle, r.id_zone, r.Rang_ou_secteur, ...CATEGORIES.map(c => r[c.field] || 0), total];
   });
-  downloadText("comptage_fertilite_gps_synthese_" + today() + ".csv", toCSV(headers, rows), "text/csv;charset=utf-8;");
+  return toCSV(headers, rows);
 }
 
-function exportGeoJSON() {
-  if (observations.length === 0) return alert("Aucune observation à exporter.");
+function buildGeoJSONContent() {
   const fc = {
     type:"FeatureCollection",
     name:"observations_comptage_fertilite_gps",
@@ -729,7 +748,55 @@ function exportGeoJSON() {
       geometry: { type:"Point", coordinates:[Number(o.Longitude_corrigee), Number(o.Latitude_corrigee)] }
     }))
   };
-  downloadText("comptage_fertilite_gps_points_" + today() + ".geojson", JSON.stringify(fc, null, 2), "application/geo+json;charset=utf-8;");
+  return JSON.stringify(fc, null, 2);
+}
+
+async function exportCSV() {
+  if (observations.length === 0) return alert("Aucune observation à exporter.");
+  const filename = "comptage_fertilite_gps_points_" + today() + ".csv";
+  await exportFileSmart(filename, buildCSVPointsContent(), "text/csv;charset=utf-8;", "Export CSV comptage fertilité GPS");
+}
+
+async function exportSummaryCSV() {
+  if (observations.length === 0) return alert("Aucune observation à exporter.");
+  const filename = "comptage_fertilite_gps_synthese_" + today() + ".csv";
+  await exportFileSmart(filename, buildSummaryCSVContent(), "text/csv;charset=utf-8;", "Synthèse fertilité GPS");
+}
+
+async function exportGeoJSON() {
+  if (observations.length === 0) return alert("Aucune observation à exporter.");
+  const filename = "comptage_fertilite_gps_points_" + today() + ".geojson";
+  await exportFileSmart(filename, buildGeoJSONContent(), "application/geo+json;charset=utf-8;", "Export GeoJSON QGIS comptage fertilité GPS");
+}
+
+async function copyCSVPoints() {
+  if (observations.length === 0) return alert("Aucune observation à copier.");
+  const ok = await copyTextToClipboard(buildCSVPointsContent());
+  if (ok) alert("CSV copié. Tu peux le coller dans Notes, Mail, Excel ou Teams.");
+  else showManualExportPanel("CSV points GPS", buildCSVPointsContent());
+}
+
+async function copyGeoJSONPoints() {
+  if (observations.length === 0) return alert("Aucune observation à copier.");
+  const ok = await copyTextToClipboard(buildGeoJSONContent());
+  if (ok) alert("GeoJSON copié. Tu peux le coller dans un fichier .geojson.");
+  else showManualExportPanel("GeoJSON QGIS", buildGeoJSONContent());
+}
+
+async function copyBackupJSON() {
+  const backup = {
+    application:"Comptage fertilité GPS CdT",
+    version:"export_google_ios_v2",
+    date_export:new Date().toISOString(),
+    storage_key:STORAGE_KEY,
+    draft_key:DRAFT_KEY,
+    observations:observations,
+    draft: (() => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); } catch(e) { return null; } })()
+  };
+  const content = JSON.stringify(backup, null, 2);
+  const ok = await copyTextToClipboard(content);
+  if (ok) alert("Sauvegarde JSON copiée. Colle-la dans Notes/Mail pour sécuriser tes données.");
+  else showManualExportPanel("Sauvegarde secours JSON", content);
 }
 
 function toCSV(headers, rows) {
@@ -742,16 +809,127 @@ function csvEscape(v) {
   return '"' + s.replace(/"/g, '""') + '"';
 }
 
+function isIOS() {
+  const ua = navigator.userAgent || "";
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function isGoogleAppIOS() {
+  const ua = navigator.userAgent || "";
+  // L'application Google sur iPhone indique souvent GSA dans le user-agent.
+  return isIOS() && (/GSA\//.test(ua) || /GoogleApp/i.test(ua));
+}
+
+async function exportFileSmart(filename, content, mimeType, title) {
+  const blob = new Blob([content], { type:mimeType });
+  const canUseFile = typeof File !== "undefined";
+  const file = canUseFile ? new File([blob], filename, { type:mimeType }) : null;
+
+  // iPhone, surtout application Google : le téléchargement Blob est souvent bloqué.
+  // On privilégie donc le partage iOS, puis la copie, puis un panneau manuel.
+  if (isIOS()) {
+    if (file && navigator.canShare && navigator.canShare({ files:[file] }) && navigator.share) {
+      try {
+        await navigator.share({ files:[file], title:title || filename, text:"Export comptage fertilité GPS" });
+        return;
+      } catch(e) {
+        // Si l'utilisateur ferme le partage, on propose quand même la copie.
+      }
+    }
+    const copied = await copyTextToClipboard(content);
+    if (copied) {
+      alert("Export copié dans le presse-papiers. Colle-le dans Notes, Mail, Teams ou Excel pour le récupérer.");
+      return;
+    }
+    showManualExportPanel(filename, content);
+    return;
+  }
+
+  // Ordinateur / Android : téléchargement classique. Si cela ne marche pas,
+  // les boutons Copier restent disponibles dans l'application.
+  try {
+    downloadText(filename, content, mimeType);
+  } catch(e) {
+    if (file && navigator.canShare && navigator.canShare({ files:[file] }) && navigator.share) {
+      try {
+        await navigator.share({ files:[file], title:title || filename, text:"Export comptage fertilité GPS" });
+        return;
+      } catch(err) {}
+    }
+    const copied = await copyTextToClipboard(content);
+    if (copied) alert("Téléchargement bloqué : contenu copié dans le presse-papiers.");
+    else showManualExportPanel(filename, content);
+  }
+}
+
 function downloadText(filename, content, type) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.rel = "noopener";
+  a.style.display = "none";
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch(e) {}
+
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "readonly");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch(e) {
+    return false;
+  }
+}
+
+function showManualExportPanel(filename, content) {
+  let panel = document.getElementById("exportPanel");
+  if (panel) panel.remove();
+  panel = document.createElement("div");
+  panel.id = "exportPanel";
+  panel.className = "export-panel";
+  panel.innerHTML = `
+    <div class="export-panel-title">Export manuel — ${escapeHtml(filename)}</div>
+    <div class="small">Sélectionne tout le texte ci-dessous, copie-le, puis colle-le dans Notes, Mail, Teams ou un fichier texte.</div>
+    <textarea id="exportPanelText">${escapeHtml(content)}</textarea>
+    <div class="map-actions" style="margin-top:10px;">
+      <button type="button" class="info" onclick="selectManualExportText()">Sélectionner tout</button>
+      <button type="button" class="secondary" onclick="document.getElementById('exportPanel').remove()">Fermer</button>
+    </div>
+  `;
+  document.body.appendChild(panel);
+  setTimeout(selectManualExportText, 100);
+}
+
+function selectManualExportText() {
+  const ta = document.getElementById("exportPanelText");
+  if (!ta) return;
+  ta.focus();
+  ta.select();
+  ta.setSelectionRange(0, ta.value.length);
 }
 
 function loadObservations() {
